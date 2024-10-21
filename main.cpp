@@ -17,11 +17,13 @@
 
 #define LOG(fmt, ...) printf("[%s %s] [%s] " fmt "\n" , __DATE__,__TIME__, __FUNCTION__, ##__VA_ARGS__);
 
-#define BREAK_IF(expr, log)                 \
-    if (expr)                               \
-    {                                       \
-        LOG(log " :%d", WSAGetLastError()); \
-        break;                              \
+#define BREAK_IF(expr, fmt, ...)                    \
+    if (expr)                                       \
+    {                                               \
+        printf("[%s %s] [%s] " fmt ": %d\n" ,       \
+                __DATE__,__TIME__, __FUNCTION__,    \
+                ##__VA_ARGS__, WSAGetLastError());  \
+        break;                                      \
     }
 
 inline bool set_sock_nob(SOCKET _s)
@@ -185,23 +187,22 @@ SOCKET create_connection(const char *_host, int _port)
     do
     {
         sock = socket(AF_INET, SOCK_STREAM, 0);
-        BREAK_IF(!valid_socket(sock), "create connecttion failed");
+        BREAK_IF(!valid_socket(sock), "socket failed");
 
         hostent*  host = gethostbyname(_host);
-        BREAK_IF(host == NULL, "gethostbyname failed");
+        BREAK_IF(host == NULL, "gethostbyname[%s] failed", _host);
 
         sockaddr_in saddr;
         memset(&saddr, 0, sizeof(saddr));
         saddr.sin_family = AF_INET;
         memcpy(&saddr.sin_addr.s_addr, host->h_addr, host->h_length);
         saddr.sin_port = htons(_port);
-        BREAK_IF(connect(sock, (sockaddr*)&saddr, sizeof(saddr)) < 0, "gethostbyname failed");
 
-        char ip[INET_ADDRSTRLEN]; // 足够大以存储IPv4地址的字符串形式
+        char ip[INET_ADDRSTRLEN] = { 0 }; // 足够大以存储IPv4地址的字符串形式
         inet_ntop(AF_INET, &(saddr.sin_addr), ip, INET_ADDRSTRLEN);
-
         LOG("host[%s]<====>ip[%s], port[%d]", _host, ip, _port);
 
+        BREAK_IF(connect(sock, (sockaddr*)&saddr, sizeof(saddr)) < 0, "connect[%s:%d] failed", ip, _port);
         success = true;
     } while (0);
 
@@ -259,24 +260,24 @@ inline bool forward_data(char* _data, int _len, SOCKET _to)
     while (_len > 0)
     {
         int n = send(_to, p, _len, 0);
-        if (n == 0)
+        if (n > 0)
         {
+            p += n;
+            _len -= n;
+        }
+        else
+        {
+            if (n < 0)
+            {
+                int err = WSAGetLastError();
+                if (err == EINTR || err == EWOULDBLOCK)
+                {
+                    continue;
+                }
+            }
             return false;
         }
-
-        if (n < 0)
-        {
-            int err = WSAGetLastError();
-            if (err == EINTR || err == EWOULDBLOCK)
-            {
-                continue;
-            }
-        }
-
-        p += n;
-        _len -= n;
     }
-
     return true;
 }
 
